@@ -35,14 +35,14 @@ def wan_profile(profile: str) -> dict:
             "max_area": 512 * 512,
             "num_frames": 49,
             "steps": 24,
-            "fps": 16,
+            "fps": 24,
             "group_offload": True,
         },
         "12 GB": {
             "max_area": 832 * 480,
             "num_frames": 81,
             "steps": 30,
-            "fps": 16,
+            "fps": 24,
             "group_offload": True,
         },
         "16 GB+": {
@@ -77,7 +77,7 @@ def load_image(path: str):
 
 def run_wan(request: dict) -> None:
     import torch
-    from diffusers import AutoencoderKLWan, UniPCMultistepScheduler, WanImageToVideoPipeline
+    from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
     from diffusers.utils import export_to_video
 
     model_path = request["model_path"]
@@ -113,7 +113,6 @@ def run_wan(request: dict) -> None:
         dtype=torch.bfloat16,
         local_files_only=True,
     )
-    pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config, flow_shift=5.0)
 
     if profile["group_offload"]:
         from diffusers.hooks import apply_group_offloading
@@ -190,7 +189,14 @@ def _load_h3_quantized(model_path: str):
     from transformers import Qwen3VLForConditionalGeneration
     from transformers import TorchAoConfig as TransformersTorchAoConfig
 
-    pipe = ModularPipeline.from_pretrained(model_path, workflow="fl2va", local_files_only=True)
+    # Select FL2VA while constructing the modular pipeline so transformer_ref is
+    # never declared or loaded. The Comfy-Org checkpoint is a ComfyUI single-file
+    # repack; this native adapter intentionally uses MiniMax's Diffusers layout.
+    pipe = ModularPipeline.from_pretrained(
+        model_path,
+        workflow="fl2va",
+        local_files_only=True,
+    )
     pipe.update_components(
         transformer=MiniMaxH3Transformer3DModel.from_pretrained(
             model_path,
@@ -229,7 +235,32 @@ def _load_h3_quantized(model_path: str):
             ),
         ),
     )
-    pipe.load_components(workflow="fl2va", dtype=torch.bfloat16)
+    # The official modular index records MiniMaxAI/MiniMax-H3 as each component's
+    # source. Override it here so an already-downloaded Fooocus model stays fully
+    # local instead of trying to contact Hugging Face during generation.
+    pipe.load_components(
+        dtype=torch.bfloat16,
+        pretrained_model_name_or_path=model_path,
+        local_files_only=True,
+    )
+    missing = [
+        name
+        for name in (
+            "transformer",
+            "text_encoder",
+            "tokenizer",
+            "processor",
+            "vae",
+            "audio_vae",
+            "scheduler",
+            "audio_scheduler",
+        )
+        if getattr(pipe, name, None) is None
+    ]
+    if missing:
+        raise RuntimeError(
+            "MiniMax H3 could not load local component(s): " + ", ".join(missing)
+        )
     pipe.transformer.requires_grad_(False)
     pipe.text_encoder.requires_grad_(False)
     offload = {
@@ -260,6 +291,7 @@ def _load_h3_quantized(model_path: str):
 
 def run_h3(request: dict) -> None:
     import torch
+    from diffusers.modular_pipelines.minimax_h3.modular_pipeline import resolve_canvas_size
     from diffusers.utils.export_utils import encode_video
 
     emit("progress", percent=3, message="Loading and quantizing MiniMax H3-Base …")
@@ -269,7 +301,13 @@ def run_h3(request: dict) -> None:
     requested_area = requested_max_area(request.get("resolution", "Auto"))
     if requested_area:
         max_area = min(max_area, requested_area)
-    width, height = rounded_size(image, max_area)
+    height, width = resolve_canvas_size(
+        image.width,
+        image.height,
+        canvas_multiple=32,
+        short_edge=768,
+        max_pixels=max_area,
+    )
     image = image.resize((width, height))
     frames = h3_num_frames(float(request.get("duration", 5)))
     generator = torch.Generator(device="cpu").manual_seed(int(request["seed"]))

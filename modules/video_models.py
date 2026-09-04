@@ -31,6 +31,7 @@ class VideoModel:
     folder_name: str
     download_bytes: int
     required_paths: tuple[str, ...]
+    weight_paths: tuple[str, ...]
     allow_patterns: tuple[str, ...] | None = None
     experimental: bool = False
 
@@ -48,10 +49,20 @@ VIDEO_MODELS = {
         download_bytes=34_000_000_000,
         required_paths=(
             MODEL_INDEX,
-            "transformer",
-            "text_encoder",
-            "tokenizer",
-            "vae",
+            "scheduler/scheduler_config.json",
+            "transformer/config.json",
+            "text_encoder/config.json",
+            "tokenizer/tokenizer_config.json",
+            "vae/config.json",
+        ),
+        weight_paths=("transformer", "text_encoder", "vae"),
+        allow_patterns=(
+            MODEL_INDEX,
+            "scheduler/**",
+            "transformer/**",
+            "text_encoder/**",
+            "tokenizer/**",
+            "vae/**",
         ),
     ),
     "h3": VideoModel(
@@ -61,16 +72,18 @@ VIDEO_MODELS = {
         folder_name="minimax-h3-fl2va",
         download_bytes=150_000_000_000,
         required_paths=(
+            MODEL_INDEX,
             "modular_model_index.json",
-            "transformer",
-            "text_encoder",
-            "tokenizer",
-            "processor",
-            "vae",
-            "audio_vae",
-            "scheduler",
-            "audio_scheduler",
+            "transformer/config.json",
+            "text_encoder/config.json",
+            "tokenizer/tokenizer_config.json",
+            "processor/preprocessor_config.json",
+            "vae/config.json",
+            "audio_vae/config.json",
+            "scheduler/scheduler_config.json",
+            "audio_scheduler/scheduler_config.json",
         ),
+        weight_paths=("transformer", "text_encoder", "vae", "audio_vae"),
         allow_patterns=(
             MODEL_INDEX,
             "modular_model_index.json",
@@ -97,7 +110,16 @@ def get_model(model_key: str) -> VideoModel:
 
 def model_components_present(model_key: str) -> bool:
     model = get_model(model_key)
-    return all((model.path / relative_path).exists() for relative_path in model.required_paths)
+    if not all((model.path / relative_path).is_file() for relative_path in model.required_paths):
+        return False
+    weight_suffixes = (".safetensors", ".bin", ".pt", ".pth")
+    return all(
+        any(
+            path.is_file() and path.name.endswith(weight_suffixes)
+            for path in (model.path / relative_path).rglob("*")
+        )
+        for relative_path in model.weight_paths
+    )
 
 
 def model_is_ready(model_key: str) -> bool:
@@ -128,6 +150,21 @@ def _requirements_hash() -> str:
     return hashlib.sha256(_video_requirements().read_bytes()).hexdigest()
 
 
+def _use_system_ca_bundle() -> None:
+    """Use the OS trust store when certifi lacks a local proxy/company CA."""
+    if os.environ.get("SSL_CERT_FILE") or os.environ.get("REQUESTS_CA_BUNDLE"):
+        return
+    for candidate in (
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/ca-bundle.pem",
+    ):
+        if Path(candidate).is_file():
+            os.environ["SSL_CERT_FILE"] = candidate
+            os.environ["REQUESTS_CA_BUNDLE"] = candidate
+            return
+
+
 def runtime_is_ready() -> bool:
     python = runtime_python()
     if not python.is_file():
@@ -140,6 +177,123 @@ def runtime_is_ready() -> bool:
         return state.get("requirements_hash") == _requirements_hash()
     except (OSError, ValueError):
         return False
+
+
+def _parse_video_requirements() -> tuple[list[str], list[str]]:
+    """Split torch wheels (PyTorch index) from the remaining PyPI packages."""
+    torch_packages: list[str] = []
+    other_packages: list[str] = []
+    for raw in _video_requirements().read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("--"):
+            continue
+        name = line.split("==", 1)[0].split("[", 1)[0].strip().lower()
+        if name in {"torch", "torchvision", "torchaudio", "torchao"}:
+            torch_packages.append(line)
+        else:
+            other_packages.append(line)
+    return torch_packages, other_packages
+
+
+def _run_pip(command: list[str], report: Callable[[str], None]) -> None:
+    """Run a pip command, stream progress, and raise with useful output on failure."""
+    env = os.environ.copy()
+    env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    env.setdefault("PIP_DEFAULT_TIMEOUT", "120")
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+    if process.stdout is None:
+        raise RuntimeError("Could not read output from the video environment installer.")
+    last_lines: list[str] = []
+    for line in process.stdout:
+        line = line.rstrip()
+        if not line:
+            continue
+        last_lines.append(line)
+        if len(last_lines) > 40:
+            last_lines = last_lines[-40:]
+        report(line)
+    return_code = process.wait()
+    if return_code != 0:
+        detail = "\n".join(last_lines[-12:]) or "(no pip output)"
+        raise RuntimeError(
+            f"Video environment setup failed with exit code {return_code}.\n{detail}"
+        )
+
+
+def _pip_base(python: str, index_url: str, trusted_host: str | None = None) -> list[str]:
+    command = [
+        python,
+        "-m",
+        "pip",
+        "install",
+        "--retries",
+        "10",
+        "--timeout",
+        "120",
+        "-i",
+        index_url,
+    ]
+    if trusted_host:
+        command.extend(["--trusted-host", trusted_host])
+    return command
+
+
+def _run_import_probe(python: str, script: str, failure_label: str) -> str:
+    probe = subprocess.run(
+        [python, "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        detail = (probe.stderr or probe.stdout or f"{failure_label} failed.").strip()
+        raise RuntimeError(f"{failure_label}:\n{detail}")
+    return probe.stdout.strip()
+
+
+def _try_pypi_indexes(
+    python: str,
+    packages: list[str],
+    report: Callable[[str], None],
+    label: str,
+    *,
+    extra_args: list[str] | None = None,
+) -> None:
+    """Install packages trying the primary index, then a mirror fallback."""
+    from urllib.parse import urlparse
+
+    pypi_index = os.environ.get("FOOOCUS_VIDEO_PYPI_INDEX", "https://pypi.org/simple")
+    mirror_index = os.environ.get(
+        "FOOOCUS_VIDEO_PYPI_MIRROR",
+        "https://pypi.tuna.tsinghua.edu.cn/simple",
+    )
+    # Prefer a working mirror first when the official index is flaky (common SSL resets).
+    indexes = [mirror_index]
+    if pypi_index not in indexes:
+        indexes.append(pypi_index)
+
+    errors: list[str] = []
+    for index_url in indexes:
+        host = urlparse(index_url).hostname
+        trusted = host if "pypi.org" not in index_url else None
+        report(f"{label} using {index_url} …")
+        try:
+            command = _pip_base(python, index_url, trusted)
+            if extra_args:
+                command.extend(extra_args)
+            command.extend(packages)
+            _run_pip(command, report)
+            return
+        except RuntimeError as exc:
+            errors.append(str(exc))
+            report(f"{label} failed on {index_url}; trying next source …")
+    raise RuntimeError("\n\n".join(errors) if errors else f"{label} failed.")
 
 
 def setup_runtime(progress: Callable[[str], None] | None = None) -> Path:
@@ -157,31 +311,127 @@ def setup_runtime(progress: Callable[[str], None] | None = None) -> Path:
         report("Creating isolated video environment …")
         venv.EnvBuilder(with_pip=True, clear=False).create(runtime_dir)
 
-    report("Installing video runtime packages …")
-    process = subprocess.Popen(
-        [
-            str(runtime_python()),
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "-r",
-            str(requirements),
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
+    python = str(runtime_python())
+    torch_index = os.environ.get(
+        "FOOOCUS_VIDEO_TORCH_INDEX",
+        "https://download.pytorch.org/whl/cu128",
     )
-    if process.stdout is None:
-        raise RuntimeError("Could not read output from the video environment installer.")
-    for line in process.stdout:
-        line = line.strip()
-        if line:
-            report(line)
-    return_code = process.wait()
-    if return_code != 0:
-        raise RuntimeError(f"Video environment setup failed with exit code {return_code}.")
+    torch_packages, other_packages = _parse_video_requirements()
+
+    report("Ensuring pip tooling is available …")
+    try:
+        _try_pypi_indexes(python, ["pip", "setuptools", "wheel"], report, "Upgrading pip")
+    except RuntimeError as exc:
+        report(
+            "Pip upgrade skipped because package indexes are unreachable. "
+            f"Continuing with the existing pip.\n{exc}"
+        )
+
+    if torch_packages:
+        from urllib.parse import urlparse
+
+        mirror_index = os.environ.get(
+            "FOOOCUS_VIDEO_PYPI_MIRROR",
+            "https://pypi.tuna.tsinghua.edu.cn/simple",
+        )
+        mirror_host = urlparse(mirror_index).hostname or "pypi.tuna.tsinghua.edu.cn"
+        # Satisfy ordinary Python dependencies from the working PyPI mirror first.
+        # The subsequent Torch install can then resolve only Torch's CUDA companion
+        # wheels from the official PyTorch index, without reaching pythonhosted.org.
+        report("Installing Torch Python dependencies from mirror …")
+        _run_pip(
+            [
+                python,
+                "-m",
+                "pip",
+                "install",
+                "--retries",
+                "10",
+                "--timeout",
+                "120",
+                "-i",
+                mirror_index,
+                "--trusted-host",
+                mirror_host,
+                "filelock",
+                "typing-extensions>=4.10.0",
+                "sympy",
+                "networkx",
+                "jinja2",
+                "fsspec",
+                "pillow",
+                "numpy",
+                "cuda-bindings==12.9.4",
+            ],
+            report,
+        )
+        report("Installing Torch and matching CUDA companion wheels …")
+        _run_pip(
+            [
+                python,
+                "-m",
+                "pip",
+                "install",
+                "--retries",
+                "10",
+                "--timeout",
+                "120",
+                "--index-url",
+                torch_index,
+                *torch_packages,
+            ],
+            report,
+        )
+        torch_version = _run_import_probe(
+            python,
+            "import torch, torchvision, torchaudio; print(torch.__version__)",
+            "Torch packages installed but failed to import",
+        )
+        report(f"Torch ready: {torch_version}")
+
+    if other_packages:
+        # Keep already-installed Torch/CUDA wheels; only pull missing helper deps.
+        # Install the pinned packages without deps first so PyPI cannot replace the
+        # CUDA companions that came from the PyTorch index.
+        _try_pypi_indexes(
+            python,
+            other_packages,
+            report,
+            "Installing Diffusers and video helper packages (no deps)",
+            extra_args=["--no-deps", "--upgrade-strategy", "only-if-needed"],
+        )
+        helper_deps = [
+            "importlib-metadata",
+            "filelock",
+            "requests",
+            "tqdm",
+            "regex",
+            "pyyaml",
+            "packaging",
+            "tokenizers>=0.22.0,<0.24.0",
+            "hf-xet",
+            "httpx",
+            "typer",
+            "rich",
+        ]
+        _try_pypi_indexes(
+            python,
+            helper_deps,
+            report,
+            "Installing Diffusers/Transformers helper dependencies",
+            extra_args=["--upgrade-strategy", "only-if-needed"],
+        )
+        if torch_packages:
+            torch_version = _run_import_probe(
+                python,
+                (
+                    "import torch, diffusers, transformers; "
+                    "from torchao.quantization import Int8WeightOnlyConfig; "
+                    "Int8WeightOnlyConfig(version=2); print(torch.__version__)"
+                ),
+                "Video packages installed but failed to import",
+            )
+            report(f"Video stack ready (Torch {torch_version})")
 
     marker = runtime_dir / ".fooocus-video-runtime"
     marker.write_text(
@@ -202,6 +452,7 @@ def _download_model_process(model_key: str, status_file: str) -> None:
     model = get_model(model_key)
     status_path = Path(status_file)
     try:
+        _use_system_ca_bundle()
         from huggingface_hub import snapshot_download
 
         status_path.write_text("Connecting to Hugging Face …", encoding="utf-8")
@@ -210,7 +461,6 @@ def _download_model_process(model_key: str, status_file: str) -> None:
             repo_id=model.repo_id,
             local_dir=str(model.path),
             allow_patterns=list(model.allow_patterns) if model.allow_patterns else None,
-            resume_download=True,
         )
         if not model_components_present(model_key):
             raise RuntimeError("Download completed but required model components are missing.")

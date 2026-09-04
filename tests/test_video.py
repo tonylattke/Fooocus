@@ -36,10 +36,18 @@ class TestVideoRuntime(unittest.TestCase):
         self.assertLess(low["max_area"], high["max_area"])
         self.assertLess(low["num_frames"], high["num_frames"])
         self.assertTrue(low["group_offload"])
+        self.assertEqual(24, low["fps"])
+        self.assertEqual(24, high["fps"])
         self.assertEqual(832 * 480, video_runtime.requested_max_area("Medium (480p)"))
 
 
 class TestVideoModels(unittest.TestCase):
+    def test_parse_requirements_splits_torch_stack(self):
+        torch_packages, other_packages = video_models._parse_video_requirements()
+        self.assertTrue(any(package.startswith("torch==") for package in torch_packages))
+        self.assertTrue(any(package.startswith("diffusers==") for package in other_packages))
+        self.assertFalse(any(package.startswith("torch==") for package in other_packages))
+
     def test_auto_profile_selection(self):
         with mock.patch.object(video_models, "hardware_info", return_value={"vram_gb": 8}):
             self.assertEqual("8 GB", video_models.resolve_hardware_profile())
@@ -82,13 +90,16 @@ class TestVideoModels(unittest.TestCase):
             model = video_models.get_model("wan")
             for required in model.required_paths:
                 path = model.path / required
-                if "." in Path(required).name:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text("{}", encoding="utf-8")
-                else:
-                    path.mkdir(parents=True, exist_ok=True)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}", encoding="utf-8")
+            for weight_path in model.weight_paths:
+                path = model.path / weight_path / "weights.safetensors"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"weights")
             (model.path / ".fooocus-complete").write_text(model.repo_id, encoding="utf-8")
             self.assertTrue(video_models.model_is_ready("wan"))
+            (model.path / model.weight_paths[0] / "weights.safetensors").unlink()
+            self.assertFalse(video_models.model_is_ready("wan"))
 
 
 class TestVideoWorkerAndLogging(unittest.TestCase):

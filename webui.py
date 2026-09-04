@@ -177,13 +177,16 @@ def setup_and_download_video_model(model_label, hardware_profile, h3_authorizati
         daemon=True,
     )
     setup_thread.start()
+    log_lines = []
     while True:
         update = messages.get()
         if update is None:
             break
-        yield update
+        log_lines.append(str(update))
+        # Keep the status box readable while still preserving recent context.
+        yield "\n".join(log_lines[-40:])
     if outcome.get('error'):
-        yield f"Video runtime setup failed: {outcome['error']}"
+        yield "\n".join(log_lines[-20:] + ["", f"Video runtime setup failed: {outcome['error']}"])
         return
 
     if video_models.model_is_ready(model_key):
@@ -436,14 +439,16 @@ with shared.gradio_root:
                                     visible=False,
                                 )
                                 gr.Markdown(
-                                    'H3 is local H3-Base (768p), not the hosted 2K workflow. '
+                                    'H3 uses the official MiniMaxAI Diffusers FL2VA files (768p), '
+                                    'not the Comfy-Org single-file ComfyUI repack or hosted 2K workflow. '
                                     'Its community license excludes the EU, UK, US, and South Korea '
                                     'without separate authorization.'
                                 )
                                 video_model_status = gr.Textbox(
                                     label='Setup and status',
                                     value=video_models.model_status_summary(),
-                                    lines=5,
+                                    lines=12,
+                                    max_lines=30,
                                     interactive=False,
                                 )
                                 with gr.Row():
