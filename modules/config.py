@@ -201,6 +201,8 @@ path_fooocus_expansion = get_dir_or_set_default('path_fooocus_expansion', '../mo
 path_wildcards = get_dir_or_set_default('path_wildcards', '../wildcards/')
 path_safety_checker = get_dir_or_set_default('path_safety_checker', '../models/safety_checker/')
 path_sam = get_dir_or_set_default('path_sam', '../models/sam/')
+path_video_models = get_dir_or_set_default('path_video_models', '../models/video/')
+path_video_runtime = get_dir_or_set_default('path_video_runtime', '../models/video_runtime/')
 path_outputs = get_path_output()
 
 

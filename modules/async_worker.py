@@ -3,6 +3,7 @@ import threading
 from extras.inpaint_mask import generate_mask_from_image, SAMOptions
 from modules.patch import PatchSettings, patch_settings, patch_all
 import modules.config
+from modules.generation_lock import generation_lock
 
 patch_all()
 
@@ -1468,11 +1469,12 @@ def worker():
             task = async_tasks.pop(0)
 
             try:
-                handler(task)
-                if task.generate_image_grid:
-                    build_image_wall(task)
-                task.yields.append(['finish', task.results])
-                pipeline.prepare_text_encoder(async_call=True)
+                with generation_lock:
+                    handler(task)
+                    if task.generate_image_grid:
+                        build_image_wall(task)
+                    task.yields.append(['finish', task.results])
+                    pipeline.prepare_text_encoder(async_call=True)
             except:
                 traceback.print_exc()
                 task.yields.append(['finish', task.results])

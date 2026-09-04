@@ -243,6 +243,16 @@ See [docker.md](docker.md)
 
 See the guidelines [here](https://github.com/lllyasviel/Fooocus/discussions/1405).
 
+## Local Image-to-Video
+
+Enable **Input Image**, open **Image to Video**, upload an image (or select a Fooocus gallery image), and click **Download / Set up**. Fooocus creates an isolated video environment and downloads the selected model into `models/video/`; interrupted downloads can be resumed.
+
+- **Wan 2.2 TI2V 5B** is the recommended local model. Auto mode selects reduced resolution, frame count, and CPU offload for 8 GB and 12 GB GPUs.
+- **MiniMax H3-Base FL2VA** is experimental, generates 768p video with stereo audio, and needs roughly 140 GiB disk plus about 75 GB system RAM when offloaded to a 12–16 GB GPU. H3 is never selected automatically.
+- The MiniMax H3 community license excludes the EU, UK, US, and South Korea unless you have separate authorization. The UI requires an authorization acknowledgement before setup.
+
+Developers with downloaded models can run the opt-in smoke test with `PYTHONPATH=. python tests/smoke_video.py --model wan --image input.png` (or `--model h3`).
+
 ## Minimal Requirement
 
 Below is the minimal requirement for running Fooocus locally. If your device capability is lower than this spec, you may not be able to use Fooocus locally. (Please let us know, in any case, if your device capability is lower but Fooocus still works.)
