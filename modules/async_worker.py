@@ -862,6 +862,14 @@ def worker():
                 async_task.steps, 1, skip_prompt_processing=skip_prompt_processing)
         if (async_task.current_tab == 'inpaint' or (
                 async_task.current_tab == 'ip' and async_task.mixing_image_prompt_and_inpaint)) \
+                and async_task.inpaint_input_image is not None:
+            from modules.gradio_hijack import normalize_editor_to_sketch
+            async_task.inpaint_input_image = normalize_editor_to_sketch(async_task.inpaint_input_image)
+            async_task.inpaint_mask_image_upload = normalize_editor_to_sketch(
+                async_task.inpaint_mask_image_upload)
+
+        if (async_task.current_tab == 'inpaint' or (
+                async_task.current_tab == 'ip' and async_task.mixing_image_prompt_and_inpaint)) \
                 and isinstance(async_task.inpaint_input_image, dict):
             inpaint_image = async_task.inpaint_input_image['image']
             inpaint_mask = async_task.inpaint_input_image['mask'][:, :, 0]

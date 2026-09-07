@@ -57,55 +57,78 @@ Also, [click here to browse the advanced features.](https://github.com/lllyasvie
 
 # Download
 
-### Windows
+### Windows (easiest from scratch)
 
-You can directly download Fooocus with:
+This fork uses **Gradio 4.44.1**. The fastest clean install on Windows is:
 
-**[>>> Click here to download <<<](https://github.com/lllyasviel/Fooocus/releases/download/v2.5.0/Fooocus_win64_2-5-0.7z)**
+#### 1) Install prerequisites (once)
 
-After you download the file, please uncompress it and then run the "run.bat".
+1. **Git for Windows**: https://git-scm.com/download/win  
+2. **Python 3.10 or 3.11** (3.12 also works): https://www.python.org/downloads/windows/  
+   - During setup, enable **Add python.exe to PATH**  
+   - Enable **pip**  
+3. **NVIDIA driver** (recommended): install a current Game Ready / Studio driver if you have an NVIDIA GPU  
+4. Free disk space: about **20–40 GB** for models + environment
 
-![image](https://github.com/lllyasviel/Fooocus/assets/19834515/c49269c4-c274-4893-b368-047c401cc58c)
+#### 2) Download Fooocus
 
-The first time you launch the software, it will automatically download models:
+Open **Command Prompt** or **PowerShell**:
 
-1. It will download [default models](#models) to the folder "Fooocus\models\checkpoints" given different presets. You can download them in advance if you do not want automatic download.
-2. Note that if you use inpaint, at the first time you inpaint an image, it will download [Fooocus's own inpaint control model from here](https://huggingface.co/lllyasviel/fooocus_inpaint/resolve/main/inpaint_v26.fooocus.patch) as the file "Fooocus\models\inpaint\inpaint_v26.fooocus.patch" (the size of this file is 1.28GB).
+```bat
+git clone https://github.com/tonylattke/Fooocus.git
+cd Fooocus
+```
 
-After Fooocus 2.1.60, you will also have `run_anime.bat` and `run_realistic.bat`. They are different model presets (and require different models, but they will be automatically downloaded). [Check here for more details](https://github.com/lllyasviel/Fooocus/discussions/679).
+Or download the ZIP from GitHub → **Code** → **Download ZIP**, then unzip and open that folder.
 
-After Fooocus 2.3.0 you can also switch presets directly in the browser. Keep in mind to add these arguments if you want to change the default behavior:
-* Use `--disable-preset-selection` to disable preset selection in the browser.
-* Use `--always-download-new-model` to download missing models on preset switch. Default is fallback to `previous_default_models` defined in the corresponding preset, also see terminal output.
+#### 3) Install dependencies
 
-![image](https://github.com/lllyasviel/Fooocus/assets/19834515/d386f817-4bd7-490c-ad89-c1e228c23447)
+Double-click:
 
-If you already have these files, you can copy them to the above locations to speed up installation.
+```text
+install.bat
+```
 
-Note that if you see **"MetadataIncompleteBuffer" or "PytorchStreamReader"**, then your model files are corrupted. Please download models again.
+This creates `fooocus_env`, installs PyTorch (CUDA 12.1 when possible), then installs Fooocus requirements including Gradio 4.44.1.
 
-Below is a test on a relatively low-end laptop with **16GB System RAM** and **6GB VRAM** (Nvidia 3060 laptop). The speed on this machine is about 1.35 seconds per iteration. Pretty impressive – nowadays laptops with 3060 are usually at very acceptable price.
+#### 4) Run
 
-![image](https://github.com/lllyasviel/Fooocus/assets/19834515/938737a5-b105-4f19-b051-81356cb7c495)
+Double-click one of:
 
-Besides, recently many other software report that Nvidia driver above 532 is sometimes 10x slower than Nvidia driver 531. If your generation time is very long, consider download [Nvidia Driver 531 Laptop](https://www.nvidia.com/download/driverResults.aspx/199991/en-us/) or [Nvidia Driver 531 Desktop](https://www.nvidia.com/download/driverResults.aspx/199990/en-us/).
+| File | What it does |
+| --- | --- |
+| `run.bat` | Default preset |
+| `run_anime.bat` | Anime preset |
+| `run_realistic.bat` | Realistic preset |
 
-Note that the minimal requirement is **4GB Nvidia GPU memory (4GB VRAM)** and **8GB system memory (8GB RAM)**. This requires using Microsoft’s Virtual Swap technique, which is automatically enabled by your Windows installation in most cases, so you often do not need to do anything about it. However, if you are not sure, or if you manually turned it off (would anyone really do that?), or **if you see any "RuntimeError: CPUAllocator"**, you can enable it here:
+Your browser should open at **http://127.0.0.1:7865**.  
+The first launch downloads [default models](#models) automatically into `models\checkpoints` (and related folders).
+
+Optional CLI examples:
+
+```bat
+run.bat --listen
+run.bat --preset anime
+run.bat --always-download-new-model
+```
+
+#### Common Windows notes
+
+- Need **~4GB NVIDIA VRAM** and **~8GB RAM** minimum (more is better). See [minimal requirement](#minimal-requirement).
+- If you see **"MetadataIncompleteBuffer"** or **"PytorchStreamReader"**, a model file is corrupted — delete it and let Fooocus download again.
+- If you see **"RuntimeError: CPUAllocator"**, enable Windows virtual memory / pagefile and keep ~40GB free disk space.
+- Troubleshooting: [troubleshoot.md](troubleshoot.md)
 
 <details>
-<summary>Click here to see the image instructions. </summary>
+<summary>Legacy: official portable 7z (upstream Gradio 3 build)</summary>
 
-![image](https://github.com/lllyasviel/Fooocus/assets/19834515/2a06b130-fe9b-4504-94f1-2763be4476e9)
+Upstream also ships a portable Windows package (older Gradio stack):
 
-**And make sure that you have at least 40GB free space on each drive if you still see "RuntimeError: CPUAllocator" !**
+**[Fooocus_win64_2-5-0.7z](https://github.com/lllyasviel/Fooocus/releases/download/v2.5.0/Fooocus_win64_2-5-0.7z)**
+
+Uncompress and run `run.bat`. Prefer `install.bat` / `run.bat` from this repository if you want Gradio 4.44.1 and the latest changes in this fork.
 
 </details>
-
-Please open an issue if you use similar devices but still cannot achieve acceptable performances.
-
-Note that the [minimal requirement](#minimal-requirement) for different platforms is different.
-
-See also the common problems and troubleshoots [here](troubleshoot.md).
 
 ### Colab
 
@@ -204,18 +227,20 @@ Use `python entry_with_update.py --preset anime` or `python entry_with_update.py
 
 Note that the [minimal requirement](#minimal-requirement) for different platforms is different.
 
-Same with Windows. Download the software and edit the content of `run.bat` as:
+1. Run `install.bat` once (same as NVIDIA).
+2. Then install DirectML PyTorch and launch with `--directml`:
 
-    .\python_embeded\python.exe -m pip uninstall torch torchvision torchaudio torchtext functorch xformers -y
-    .\python_embeded\python.exe -m pip install torch-directml
-    .\python_embeded\python.exe -s Fooocus\entry_with_update.py --directml
-    pause
+```bat
+fooocus_env\Scripts\python.exe -m pip uninstall torch torchvision torchaudio -y
+fooocus_env\Scripts\python.exe -m pip install torch-directml
+fooocus_env\Scripts\python.exe entry_with_update.py --directml
+```
 
-Then run the `run.bat`.
+Or create a shortcut / edit a copy of `run.bat` and append `--directml`.
 
-AMD is not intensively tested, however. The AMD support is in beta.
+AMD support is beta / not intensively tested.
 
-For AMD, use `.\python_embeded\python.exe Fooocus\entry_with_update.py --directml --preset anime` or `.\python_embeded\python.exe Fooocus\entry_with_update.py --directml --preset realistic` for Fooocus Anime/Realistic Edition.
+Use `--preset anime` or `--preset realistic` as needed.
 
 ### Mac
 
@@ -479,17 +504,13 @@ For example, below is the content of `Fooocus/language/example.json`:
 
 If you add `--language example` arg, Fooocus will read `Fooocus/language/example.json` to translate the UI.
 
-For example, you can edit the ending line of Windows `run.bat` as
+For example, you can launch with:
 
-    .\python_embeded\python.exe -s Fooocus\entry_with_update.py --language example
-
-Or `run_anime.bat` as
-
-    .\python_embeded\python.exe -s Fooocus\entry_with_update.py --language example --preset anime
-
-Or `run_realistic.bat` as
-
-    .\python_embeded\python.exe -s Fooocus\entry_with_update.py --language example --preset realistic
+```bat
+run.bat --language example
+run_anime.bat --language example
+run_realistic.bat --language example
+```
 
 For practical translation, you may create your own file like `Fooocus/language/jp.json` or `Fooocus/language/cn.json` and then use flag `--language jp` or `--language cn`. Apparently, these files do not exist now. **We need your help to create these files!**
 

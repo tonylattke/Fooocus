@@ -55,8 +55,15 @@ def generate_mask_from_image(image: np.ndarray, mask_model: str = 'sam', extras=
     if extras is None:
         extras = {}
 
-    if 'image' in image:
-        image = image['image']
+    if isinstance(image, dict):
+        if 'background' in image and image['background'] is not None:
+            image = image['background']
+        elif 'image' in image:
+            image = image['image']
+        elif 'composite' in image:
+            image = image['composite']
+    if isinstance(image, np.ndarray) and image.ndim == 3 and image.shape[2] == 4:
+        image = image[:, :, :3]
 
     if mask_model != 'sam' or sam_options is None:
         result = remove(

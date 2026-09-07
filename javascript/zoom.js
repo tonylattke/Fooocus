@@ -73,8 +73,12 @@ onUiLoaded(async() => {
 
         // Create tooltip
         function createTooltip() {
+            // Gradio 3 sketch used .image-container; Gradio 4 ImageEditor still
+            // exposes it, but fall back so tooltips do not break if markup changes.
             const toolTipElemnt =
-                targetElement.querySelector(".image-container");
+                targetElement.querySelector(".image-container") ||
+                targetElement.querySelector("canvas")?.parentElement ||
+                targetElement;
             const tooltip = document.createElement("div");
             tooltip.className = "canvas-tooltip";
 
